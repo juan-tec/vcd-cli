@@ -16,8 +16,10 @@ import os
 
 import click
 from pyvcloud.vcd.client import ApiVersion
+from pyvcloud.vcd.client import E
 from pyvcloud.vcd.client import EntityType
 from pyvcloud.vcd.client import get_links
+from pyvcloud.vcd.client import RelationType
 from pyvcloud.vcd.client import ResourceType
 from pyvcloud.vcd.org import Org
 from pyvcloud.vcd.utils import access_settings_to_dict
@@ -1163,10 +1165,26 @@ def use(ctx, name):
     '--password-auto',
     is_flag=True,
     help='Autogenerate administrator password')
+@click.option(
+    '--reset-system-uuid',
+    is_flag=True,
+    help='Set a new system UUID for the VM')
 @click.option('--accept-all-eulas', is_flag=True, help='Accept all EULAs')
-def add_vm(ctx, name, source_vapp, source_vm, catalog, target_vm, hostname,
-           network, ip_allocation_mode, storage_profile, password_auto,
-           accept_all_eulas):
+def add_vm(
+    ctx,
+    name,
+    source_vapp,
+    source_vm,
+    catalog,
+    target_vm,
+    hostname,
+    network,
+    ip_allocation_mode,
+    storage_profile,
+    password_auto,
+    reset_system_uuid,
+    accept_all_eulas
+):
     try:
         restore_session(ctx, vdc_required=True)
         client = ctx.obj['client']
@@ -1183,7 +1201,7 @@ def add_vm(ctx, name, source_vapp, source_vm, catalog, target_vm, hostname,
                 catalog_item.Entity.get('href'))
         assert source_vapp_resource is not None
         vapp_resource = vdc.get_vapp(name)
-        vapp = VApp(client, resource=vapp_resource)
+        vapp = RefactoredvApp(client, resource=vapp_resource)
         spec = {'source_vm_name': source_vm, 'vapp': source_vapp_resource}
         if target_vm is not None:
             spec['target_vm_name'] = target_vm
@@ -1196,7 +1214,15 @@ def add_vm(ctx, name, source_vapp, source_vm, catalog, target_vm, hostname,
             spec['storage_profile'] = vdc.get_storage_profile(storage_profile)
         if password_auto is not None:
             spec['password_auto'] = password_auto
-        task = vapp.add_vms([spec], all_eulas_accepted=accept_all_eulas)
+
+        if reset_system_uuid:
+            task = vapp.add_vms_with_new_system_uuid(
+                [spec],
+                all_eulas_accepted=accept_all_eulas
+            )
+        else:
+            task = vapp.add_vms([spec], all_eulas_accepted=accept_all_eulas)
+
         stdout(task, ctx)
     except Exception as e:
         stderr(e, ctx)
@@ -1881,3 +1907,36 @@ def get_vapp(ctx, vapp_name):
     vdc_href = ctx.obj['profiles'].get('vdc_href')
     vdc = VDC(client, href=vdc_href)
     return VApp(client, resource=vdc.get_vapp(vapp_name))
+
+class RefactoredvApp(VApp):
+
+    def add_vms_with_new_system_uuid(
+        self,
+        specs,
+        deploy=True,
+        power_on=True,
+        all_eulas_accepted=None,
+        source_delete=False
+    ):
+
+        params = E.RecomposeVAppParams(
+            deploy='true' if deploy else 'false',
+            powerOn='true' if power_on else 'false'
+        )
+
+        for spec in specs:
+            params.append(self.to_sourced_item(spec))
+
+        params.SourcedItem.VmGeneralParams.append(E.RegenerateBiosUuid(True))
+
+        if source_delete:
+            params.SourcedItem.set('sourceDelete', 'true')
+        if all_eulas_accepted is not None:
+            params.append(E.AllEULAsAccepted(all_eulas_accepted))
+
+        return self.client.post_linked_resource(
+            self.resource,
+            RelationType.RECOMPOSE,
+            EntityType.RECOMPOSE_VAPP_PARAMS.value,
+            params
+        )
