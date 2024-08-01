@@ -30,7 +30,7 @@ for full details.
 
 ## Added features
 ### Reset system uuid
-For the command `vcd vapp add-vm` used to the deploy a VM in a vApp based on a catalog vApp template, a new flag was added to allow the user avoid the new VM keep the same system/bios uuid of the VM from the vApp template.
+For the command `vcd vapp add-vm` used to the deploy a VM in a vApp based on a catalog vApp template, a new flag was added to let the user decide whether the new VM keep the same system/bios uuid of the VM from the vApp template or not.
 
 This flag is now listed in the description of the command:
 
